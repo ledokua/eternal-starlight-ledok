@@ -537,6 +537,9 @@ public class ESCommonHandler {
 		return 0;
 	}
 
+	// 60 seconds: far beyond any weapon's attack strength delay
+	private static final int OFFHAND_ATTACK_STRENGTH_TIMER_CAP = 1200;
+
 	public static void onEntityTick(Entity entity) {
 		Level level = entity.level();
 		if (entity instanceof ItemEntity item) {
@@ -625,7 +628,11 @@ public class ESCommonHandler {
 		if (entity instanceof LivingEntity livingEntity) {
 			SpecialItemCooldown.tick(livingEntity);
 			if (livingEntity instanceof Player player && !level.isClientSide) {
-				ESDataAttachments.OFFHAND_ATTACK_STRENGTH_TIMER.setData(player, ESDataAttachments.OFFHAND_ATTACK_STRENGTH_TIMER.getData(player) + 1);
+				// every setData syncs to all tracking clients; past this value the attack strength scale is 1 for any weapon
+				int offhandTimer = ESDataAttachments.OFFHAND_ATTACK_STRENGTH_TIMER.getData(player);
+				if (offhandTimer < OFFHAND_ATTACK_STRENGTH_TIMER_CAP) {
+					ESDataAttachments.OFFHAND_ATTACK_STRENGTH_TIMER.setData(player, offhandTimer + 1);
+				}
 				if (!ItemStack.matches(ESDataAttachments.LAST_OFFHAND_ITEM.getData(player), player.getOffhandItem())) {
 					if (!ItemStack.isSameItem(ESDataAttachments.LAST_OFFHAND_ITEM.getData(player), player.getOffhandItem())) {
 						ESDataAttachments.OFFHAND_ATTACK_STRENGTH_TIMER.setData(player, 0);
@@ -646,19 +653,20 @@ public class ESCommonHandler {
 						}
 					}
 				}
-				if (level.getBiome(player.blockPosition()).is(ESBiomes.THE_ABYSS) && player.isEyeInFluid(FluidTags.WATER) && player.getY() < 0) {
+				if (player.getY() < 0 && player.isEyeInFluid(FluidTags.WATER) && level.getBiome(player.blockPosition()).is(ESBiomes.THE_ABYSS)) {
 					int maxAir = Math.max((int) Math.round((player.getMaxAirSupply() + player.getY() * 3) / 30) * 30 - 15, 0);
 					if (player.getAirSupply() > maxAir) {
 						player.setAirSupply(maxAir);
 					}
 				}
-				if (ESAccessoryUtil.getActiveAccessoriesOnArmors(player).contains(ESItems.PEARL_NECKLACE.get()) && !player.isEyeInFluid(FluidTags.WATER)) {
+				if (player.getAirSupply() < player.getMaxAirSupply() && !player.isEyeInFluid(FluidTags.WATER) && ESAccessoryUtil.getActiveAccessoriesOnArmors(player).contains(ESItems.PEARL_NECKLACE.get())) {
 					player.setAirSupply(player.getMaxAirSupply());
 				}
 				Inventory inventory = player.getInventory();
 				for (int i = 0; i < inventory.getContainerSize(); i++) {
-					if (inventory.getItem(i).has(ESDataComponents.QUIVER_ARROW.get())) {
-						inventory.getItem(i).remove(ESDataComponents.QUIVER_ARROW.get());
+					ItemStack stack = inventory.getItem(i);
+					if (!stack.isEmpty() && stack.has(ESDataComponents.QUIVER_ARROW.get())) {
+						stack.remove(ESDataComponents.QUIVER_ARROW.get());
 					}
 				}
 				if (player.getMainHandItem().is(ESItems.GRAVITY_PICKAXE.get()) || player.getOffhandItem().is(ESItems.GRAVITY_PICKAXE.get())) {
@@ -697,27 +705,37 @@ public class ESCommonHandler {
 				ESDataAttachments.LAST_CONCENTRATED_ATTACK_TIME.removeData(livingEntity);
 				ESDataAttachments.CONCENTRATION_LEVEL.removeData(livingEntity);
 			}
-			List<ItemStack> armors = List.of(livingEntity.getItemBySlot(EquipmentSlot.HEAD), livingEntity.getItemBySlot(EquipmentSlot.CHEST), livingEntity.getItemBySlot(EquipmentSlot.LEGS), livingEntity.getItemBySlot(EquipmentSlot.FEET));
-			for (ItemStack armor : armors) {
-				if (armor.getItem() instanceof TickableArmor tickableArmor) {
-					tickableArmor.tick(level, livingEntity, armor);
-				}
+			ItemStack head = livingEntity.getItemBySlot(EquipmentSlot.HEAD);
+			ItemStack chest = livingEntity.getItemBySlot(EquipmentSlot.CHEST);
+			ItemStack legs = livingEntity.getItemBySlot(EquipmentSlot.LEGS);
+			ItemStack feet = livingEntity.getItemBySlot(EquipmentSlot.FEET);
+			if (head.getItem() instanceof TickableArmor tickableArmor) {
+				tickableArmor.tick(level, livingEntity, head);
 			}
-			AttributeInstance armorAttribute = livingEntity.getAttributes().getInstance(Attributes.ARMOR);
-			if (armorAttribute != null) {
+			if (chest.getItem() instanceof TickableArmor tickableArmor) {
+				tickableArmor.tick(level, livingEntity, chest);
+			}
+			if (legs.getItem() instanceof TickableArmor tickableArmor) {
+				tickableArmor.tick(level, livingEntity, legs);
+			}
+			if (feet.getItem() instanceof TickableArmor tickableArmor) {
+				tickableArmor.tick(level, livingEntity, feet);
+			}
+			AttributeInstance armorInstance = livingEntity.getAttributes().getInstance(Attributes.ARMOR);
+			if (armorInstance != null) {
+				// armor ticks above may have changed the equipment
 				if (livingEntity.getItemBySlot(EquipmentSlot.HEAD).is(ESItems.AMARAMBER_MASK.get())
 					&& livingEntity.getItemBySlot(EquipmentSlot.CHEST).is(ESItems.AMARAMBER_CHESTPLATE.get())
 					&& livingEntity.getItemBySlot(EquipmentSlot.LEGS).isEmpty()
 					&& livingEntity.getItemBySlot(EquipmentSlot.FEET).isEmpty()) {
-					if (!armorAttribute.hasModifier(AMARAMBER_BONUS.id())) {
-						armorAttribute.addPermanentModifier(AMARAMBER_BONUS);
+					if (!armorInstance.hasModifier(AMARAMBER_BONUS.id())) {
+						armorInstance.addPermanentModifier(AMARAMBER_BONUS);
 					}
-				} else if (armorAttribute.hasModifier(AMARAMBER_BONUS.id())) {
-					armorAttribute.removeModifier(AMARAMBER_BONUS.id());
+				} else if (armorInstance.hasModifier(AMARAMBER_BONUS.id())) {
+					armorInstance.removeModifier(AMARAMBER_BONUS.id());
 				}
 			}
 			int inEtherTicks = ESDataAttachments.IN_ETHER_TICKS.getData(entity);
-			AttributeInstance armorInstance = livingEntity.getAttributes().getInstance(Attributes.ARMOR);
 			boolean inEther = ESDataAttachments.IN_ETHER.getData(entity);
 			if (!level.isClientSide) {
 				int meteorCooldown = ESDataAttachments.METEOR_COOLDOWN.getData(entity);
@@ -728,10 +746,11 @@ public class ESCommonHandler {
 				if (hireCooldown > 0) {
 					ESDataAttachments.STRANGHOUL_HIRING_COOLDOWN.setData(entity, hireCooldown - 1);
 				}
-				if (livingEntity.hasEffect(ESMobEffects.TEARY.asHolder()) && level instanceof ServerLevel serverLevel) {
+				boolean teary = livingEntity.hasEffect(ESMobEffects.TEARY.asHolder());
+				if (teary && level instanceof ServerLevel serverLevel) {
 					serverLevel.sendParticles(ParticleTypes.FALLING_WATER, livingEntity.getX() + livingEntity.getBbWidth() * (livingEntity.getRandom().nextFloat() - 0.5), livingEntity.getEyeY(), livingEntity.getZ() + livingEntity.getBbWidth() * (livingEntity.getRandom().nextFloat() - 0.5), 3, 0, 0, 0, 0);
 				}
-				if (!livingEntity.getType().is(ESTags.EntityTypes.TEARY_IMMUNE) && livingEntity.hasEffect(ESMobEffects.TEARY.asHolder())) {
+				if (teary && !livingEntity.getType().is(ESTags.EntityTypes.TEARY_IMMUNE)) {
 					int tearyTicks = ESDataAttachments.TEARY_TICKS.getData(entity);
 					if (tearyTicks <= ESConfig.INSTANCE.mobMaxTearyTicks) {
 						if (livingEntity instanceof Mob mob && mob.getTarget() != null) {
@@ -764,7 +783,7 @@ public class ESCommonHandler {
 				if (!inEther && inEtherTicks > 0) {
 					ESDataAttachments.IN_ETHER_TICKS.setData(entity, inEtherTicks - 1);
 				}
-				if (inEtherTicks <= 0 && armorInstance != null) {
+				if (inEtherTicks <= 0 && armorInstance != null && armorInstance.hasModifier(EtherFluid.ARMOR_MODIFIER_ID)) {
 					armorInstance.removeModifier(EtherFluid.ARMOR_MODIFIER_ID);
 				}
 				if (livingEntity.tickCount % 20 == 0 && inEtherTicks > 0 && armorInstance != null) {

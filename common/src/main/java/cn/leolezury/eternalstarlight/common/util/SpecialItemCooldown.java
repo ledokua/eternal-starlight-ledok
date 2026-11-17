@@ -41,6 +41,9 @@ public record SpecialItemCooldown(Holder<Item> item, int cooldown) {
 
 	public static void tick(Entity entity) {
 		if (entity.level().isClientSide) return;
+		if (!ESDataAttachments.SPECIAL_ITEM_COOLDOWNS.hasData(entity)) {
+			return;
+		}
 		List<SpecialItemCooldown> cooldowns = new ArrayList<>(ESDataAttachments.SPECIAL_ITEM_COOLDOWNS.getData(entity));
 		if (!cooldowns.isEmpty()) {
 			List<SpecialItemCooldown> newCooldowns = new ArrayList<>();
